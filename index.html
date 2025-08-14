@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Elba45 Anchor Scope Calculator — GPT-5</title>
+<title>Elba45 Anchor Scope Calculator — v2</title>
 
 <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
 <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
@@ -20,7 +20,7 @@
   header .muted{color:var(--muted);font-size:.9rem}
   .wrap{max-width:1100px;margin:0 auto;padding:14px}
   .grid{display:grid;gap:12px}
-  @media (min-width:980px){ .grid{grid-template-columns: 1.1fr 1.2fr} }
+  @media (min-width:980px){ .grid{grid-template-columns: 1.05fr 1.15fr} }
   .card{background:var(--card);border-radius:14px;padding:14px;box-shadow:0 10px 30px rgba(0,0,0,.25)}
   .row{display:flex;gap:10px;flex-wrap:wrap}
   label{display:block;font-weight:600;margin-top:8px}
@@ -28,14 +28,13 @@
   button{background:var(--accent);border:none;font-weight:700;cursor:pointer}
   .muted{color:var(--muted)}
   #map{height:280px;border-radius:10px;overflow:hidden}
-  #windChart{background:#0c1426;border-radius:10px;padding:8px}
+  .chart-wrap{height:260px;border-radius:10px;overflow:hidden;background:#0c1426;padding:8px}
   .pill{display:inline-block;border:1px solid #1f2937;border-radius:999px;padding:4px 10px;margin:2px;font-size:.85rem;color:#b8c4d8}
   .result{padding:14px;border-radius:12px;margin-top:10px;font-weight:700;text-align:center}
   .ok{background:rgba(22,163,74,.12);border:1px solid rgba(22,163,74,.4);color:#b2f5bf}
   .warn{background:rgba(245,158,11,.12);border:1px solid rgba(245,158,11,.4);color:#fde68a}
   .bad{background:rgba(220,38,38,.12);border:1px solid rgba(220,38,38,.4);color:#fecaca}
   .small{font-size:.9rem}
-  .stack{display:grid;gap:10px}
 </style>
 </head>
 <body>
@@ -44,23 +43,23 @@
   <svg width="36" height="36" viewBox="0 0 24 24" fill="none"><path d="M12 2l3 6h6l-5 4 2 8-6-4-6 4 2-8-5-4h6l3-6z" fill="#06b6d4"/></svg>
   <div>
     <h1>Elba45 Anchor Scope Calculator</h1>
-    <div class="muted">Auto-location • Wind/Gust Chart • Seabed from EUSeaMap (Europe)</div>
+    <div class="muted">Auto-location • Wind/Gust Chart • Optional seabed auto-detect (EU)</div>
   </div>
 </header>
 
 <div class="wrap grid">
-  <section class="card stack">
+  <section class="card">
     <div>
       <div class="pill">Boat: Elba 45</div>
       <div class="pill">Bow roller: <span id="bowHeightInfo">1.3 m</span></div>
-      <div class="pill">Chain: 10 mm G40 (~2.2 kg/m in water)</div>
+      <div class="pill">Chain: 10 mm G40 (~<span id="chainW">2.4</span> kg/m in water)</div>
       <div class="pill">Bridle: 8 m / 20 mm Liros Squareline (polyester)</div>
     </div>
 
-    <div id="map"></div>
-    <div class="small muted" id="coords">Locating…</div>
+    <div id="map" style="margin-top:10px"></div>
+    <div class="small muted" id="coords" style="margin-top:6px">Locating…</div>
 
-    <div class="row">
+    <div class="row" style="margin-top:8px">
       <div style="flex:1">
         <label>Water depth under keel (m)</label>
         <input id="depth" type="number" step="0.1" value="6">
@@ -73,9 +72,9 @@
 
     <div class="row">
       <div style="flex:1">
-        <label>Seabed (auto if available)</label>
+        <label>Seabed</label>
         <select id="seabed">
-          <option value="auto" selected>Auto (EMODnet EUSeaMap)</option>
+          <option value="auto" selected>Auto (EUSeaMap when available)</option>
           <option value="sand">Sand (good)</option>
           <option value="firm_mud">Firm mud</option>
           <option value="soft_mud">Soft mud / weed</option>
@@ -113,39 +112,37 @@
       </div>
     </div>
 
-    <button id="calc">Calculate recommended chain</button>
+    <button id="calc" style="margin-top:8px">Calculate recommended chain</button>
     <div id="out" class="result ok">Waiting for weather…</div>
-    <div id="notes" class="small muted"></div>
+    <div id="notes" class="small muted" style="margin-top:6px"></div>
   </section>
 
   <section class="card">
-    <canvas id="windChart" height="260"></canvas>
+    <div class="chart-wrap">
+      <canvas id="windChart" width="800" height="240"></canvas>
+    </div>
     <div class="small muted" id="modelInfo" style="margin-top:8px"></div>
   </section>
 </div>
 
 <script>
-/* === Defaults specific to your boat === */
+/* === Your boat defaults (updated chain weight 2.4 kg/m) === */
 const DEFAULTS = {
   bowHeight: 1.3,           // m
-  chainWeight: 2.2,         // kg/m (in water)
-  bridleLength: 8,          // m (polyester, low stretch)
+  chainWeight: 2.4,         // kg/m in water  <-- UPDATED
+  bridleLength: 8,          // m (polyester, low stretch ~3%)
   windageArea: 70           // m² broadside est.
 };
 document.getElementById('bowHeightInfo').textContent = DEFAULTS.bowHeight + " m";
+document.getElementById('chainW').textContent = DEFAULTS.chainWeight.toFixed(1);
 
-/* === State === */
-let map, marker, windChart;
-let user = { lat:null, lon:null, weather:null, seabed:autoLabel('Detecting…') };
+let map, marker, windChart = null;
+let user = { lat:null, lon:null, weather:null, seabed:{code:'unknown', label:'Unknown', raw:null} };
 
-function autoLabel(x){ return `Auto: ${x}`; }
-
-/* === Map init === */
+/* ===== Map ===== */
 function initMap(lat, lon){
   map = L.map('map', { zoomControl:false }).setView([lat, lon], 14);
-  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{
-    attribution:'© OpenStreetMap'
-  }).addTo(map);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{ attribution:'© OpenStreetMap' }).addTo(map);
   marker = L.marker([lat, lon]).addTo(map);
 }
 function updateMap(lat, lon){
@@ -154,11 +151,10 @@ function updateMap(lat, lon){
   map.setView([lat, lon], 14);
 }
 
-/* === Weather fetch (Open-Meteo) ===
-   We request next 24h (configurable) and get wind in KNOTS directly. */
+/* ===== Weather (Open-Meteo) ===== */
 async function fetchWeather(lat, lon){
   const lookahead = parseInt(document.getElementById('lookahead').value,10);
-  const modelVal = document.getElementById('model').value; // "", gfs, ecmwf_ifs025, icon_seamless
+  const modelVal = document.getElementById('model').value;
   const params = new URLSearchParams({
     latitude: lat, longitude: lon,
     hourly: 'wind_speed_10m,wind_gusts_10m',
@@ -167,85 +163,67 @@ async function fetchWeather(lat, lon){
     timezone: 'auto'
   });
   if(modelVal) params.set('models', modelVal);
-
   const url = `https://api.open-meteo.com/v1/forecast?${params.toString()}`;
   const res = await fetch(url);
   if(!res.ok) throw new Error(`Weather error ${res.status}`);
-  const data = await res.json();
-  return data;
+  return await res.json();
 }
 
-/* === Wind chart === */
+/* ===== Chart (fixed-size, single instance) ===== */
 function drawChart(times, windKn, gustKn){
   const ctx = document.getElementById('windChart').getContext('2d');
-  if(windChart) windChart.destroy();
+  if(windChart){ windChart.destroy(); windChart = null; }
   windChart = new Chart(ctx, {
     type:'line',
     data:{
       labels: times.map(t => t.slice(11,16)),
       datasets:[
-        {label:'Wind (kn)', data: windKn, borderColor:'#06b6d4', tension:.25},
-        {label:'Gusts (kn)', data: gustKn, borderColor:'#f97316', tension:.25}
+        {label:'Wind (kn)', data: windKn, borderColor:'#06b6d4', tension:.25, pointRadius:0},
+        {label:'Gusts (kn)', data: gustKn, borderColor:'#f97316', tension:.25, pointRadius:0}
       ]
     },
     options:{
-      responsive:true, maintainAspectRatio:false,
-      scales:{ x:{ ticks:{ color:'#9fb0c6' }}, y:{ ticks:{ color:'#9fb0c6' }}},
+      responsive:true,
+      maintainAspectRatio:false,   // canvas height is controlled by .chart-wrap
+      animation:false,
+      scales:{
+        x:{ ticks:{ color:'#9fb0c6' }, grid:{ color:'rgba(148,163,184,0.15)' }},
+        y:{ ticks:{ color:'#9fb0c6' }, grid:{ color:'rgba(148,163,184,0.15)' }}
+      },
       plugins:{ legend:{ labels:{ color:'#cbd5e1' }} }
     }
   });
 }
 
-/* === Seabed lookup via EMODnet EUSeaMap 2023 (Europe) ===
-   We use WMS GetFeatureInfo at CRS:84 (lon/lat axis order) and try JSON first,
-   falling back to text/html parse. */
-async function fetchSeabedEUSeaMap(lat, lon){
-  // Build a tiny bbox around the point for a 101x101 image, click center pixel (50,50)
-  const d = 0.01;
-  const bbox = [lon-d, lat-d, lon+d, lat+d].join(','); // CRS:84 → lon,lat
-  // Workspace & layer: emodnet_view:EUSeaMap_2023_EUNIS2019 (broad-scale habitats)
+/* ===== Seabed (EU only; silent fail if CORS) ===== */
+async function fetchSeabedEU(lat, lon){
+  const d = 0.01, bbox = [lon-d, lat-d, lon+d, lat+d].join(',');
   const base = 'https://ows.emodnet-seabedhabitats.eu/geoserver/emodnet_view/wms';
-  const common = `SERVICE=WMS&VERSION=1.3.0&REQUEST=GetFeatureInfo&CRS=CRS:84&WIDTH=101&HEIGHT=101&I=50&J=50&BBOX=${bbox}&INFO_FORMAT=application/json&QUERY_LAYERS=emodnet_view:EUSeaMap_2023_EUNIS2019&LAYERS=emodnet_view:EUSeaMap_2023_EUNIS2019`;
-  let url = `${base}?${common}`;
+  const qs = `SERVICE=WMS&VERSION=1.3.0&REQUEST=GetFeatureInfo&CRS=CRS:84&WIDTH=101&HEIGHT=101&I=50&J=50&BBOX=${bbox}&INFO_FORMAT=application/json&QUERY_LAYERS=emodnet_view:EUSeaMap_2023_EUNIS2019&LAYERS=emodnet_view:EUSeaMap_2023_EUNIS2019`;
   try{
-    const r = await fetch(url);
+    const r = await fetch(`${base}?${qs}`, {mode:'cors'});
     if(r.ok){
       const j = await r.json();
-      const feat = j.features && j.features[0];
-      if(feat){
-        const props = feat.properties || {};
-        // Try common fields: habitat / EUNIS label / description
-        const raw = (props.habitat || props.HABITAT || props.eunis || props.Description || '').toString();
+      const f = j.features && j.features[0];
+      if(f){
+        const raw = (f.properties?.habitat || f.properties?.HABITAT || f.properties?.Description || '')+'';
         return classifySeabed(raw);
       }
     }
-  }catch(e){ /* fall through */ }
-
-  // Fallback: text/html
-  url = `${base}?${common.replace('application/json','text/html')}`;
-  try{
-    const r = await fetch(url);
-    if(r.ok){
-      const html = await r.text();
-      const lower = html.toLowerCase();
-      return classifySeabed(lower);
-    }
-  }catch(e){}
-  return { code:'unknown', label:'Unknown', source:'EMODnet', raw:null };
+  }catch(e){/* ignore */ }
+  return {code:'unknown', label:'Unknown', raw:null};
 }
-
 function classifySeabed(text){
-  const t = (text||'').toLowerCase();
-  // Heuristics for common EUSeaMap labels
-  if(/seagrass|posidonia|macrophyte|maerl|alg|phytobenthos|vegetated/.test(t)) return {code:'soft_mud', label:'Seagrass/Weed', source:'EMODnet', raw:text};
-  if(/mud|silt|clayey/.test(t)) return {code:'firm_mud', label:'Mud', source:'EMODnet', raw:text};
-  if(/sand|sandy|gravelly sand/.test(t)) return {code:'sand', label:'Sand', source:'EMODnet', raw:text};
-  if(/gravel|pebble|cobble/.test(t)) return {code:'sand', label:'Gravel/Coarse', source:'EMODnet', raw:text};
-  if(/rock|reef|boulder/.test(t)) return {code:'rock', label:'Rock', source:'EMODnet', raw:text};
-  return {code:'unknown', label:'Unknown', source:'EMODnet', raw:text};
+  const t=(text||'').toLowerCase();
+  if(/seagrass|posidonia|maerl|alg|veget/.test(t)) return {code:'soft_mud', label:'Seagrass/Weed', raw:text};
+  if(/mud|silt|clayey/.test(t)) return {code:'firm_mud', label:'Mud', raw:text};
+  if(/sand|sandy|gravelly sand/.test(t)) return {code:'sand', label:'Sand', raw:text};
+  if(/gravel|pebble|cobble/.test(t)) return {code:'sand', label:'Gravel/Coarse', raw:text};
+  if(/rock|reef|boulder/.test(t)) return {code:'rock', label:'Rock', raw:text};
+  return {code:'unknown', label:'Unknown', raw:text};
 }
 
-/* === Scope rules === */
+/* ===== Scope rules ===== */
 function baseScopeFromGust(g){
   if(g <= 12) return 4;
   if(g <= 20) return 5;
@@ -258,7 +236,7 @@ function seabedMultiplier(code){
     case 'sand': return 1.0;
     case 'firm_mud': return 1.12;
     case 'soft_mud': return 1.3;
-    case 'rock': return 1.5; // assume poorer bite in weed/patchy rock
+    case 'rock': return 1.5;
     default: return 1.2;
   }
 }
@@ -268,7 +246,17 @@ function crowdingModifier(val){
   return 1.0;
 }
 
-/* === Calculation === */
+/* Simple catenary heuristic (using your 2.4 kg/m) → for info only */
+function catenaryRatio(chain_m, depth_m, gust_kn){
+  const g = 9.81, W = DEFAULTS.chainWeight * chain_m * g; // N
+  const v = gust_kn * 0.514444, rho=1.225, Cd=1.2;
+  const windN = 0.5*rho*Cd*DEFAULTS.windageArea*v*v;
+  const verticalFraction = Math.min(1, depth_m / Math.max(0.5, chain_m));
+  const verticalSupport = W * verticalFraction * 1.2; // safety factor
+  return (verticalSupport / Math.max(1, windN));
+}
+
+/* ===== Calculation ===== */
 function calculateNow(){
   const out = document.getElementById('out');
   const notesEl = document.getElementById('notes');
@@ -278,91 +266,72 @@ function calculateNow(){
   const crowd = document.getElementById('crowd').value;
 
   const workingDepth = depth + tide + DEFAULTS.bowHeight;
-  // Get peak gust in lookahead
+
+  // Peak gust from loaded data (kn)
   let peakG = 15;
   if(user.weather?.hourly?.wind_gusts_10m?.length){
     peakG = Math.max(...user.weather.hourly.wind_gusts_10m);
+  } else if(user.weather?.hourly?.wind_speed_10m?.length){
+    peakG = Math.max(...user.weather.hourly.wind_speed_10m);
   }
-  let scope = baseScopeFromGust(peakG);
-  // Account for polyester (low stretch) in higher winds
-  if(peakG > 25) scope *= 1.10;
 
-  // Seabed factor
+  let scope = baseScopeFromGust(peakG);
+  if(peakG > 25) scope *= 1.10;           // polyester bridle compensation
   const seabedCode = (seabedSel==='auto' ? user.seabed.code : seabedSel);
   scope *= seabedMultiplier(seabedCode);
-  // Crowding tweak
   scope *= crowdingModifier(crowd);
 
   const chainRequired = Math.ceil(scope * workingDepth);
-  // Presentation
-  let cls = 'ok';
-  if(scope >= 7 && scope < 10) cls = 'warn';
-  if(scope >= 10) cls = 'bad';
+
+  // Result styling
+  let cls='ok'; if(scope>=7 && scope<10) cls='warn'; if(scope>=10) cls='bad';
   out.className = `result ${cls}`;
   out.innerHTML = `Chain to veer: <strong>${chainRequired} m</strong> &nbsp; (scope <strong>${scope.toFixed(1)}:1</strong>, working depth <strong>${workingDepth.toFixed(2)} m</strong>)`;
 
-  // Notes
+  // Info notes
   const seabedLabel = (seabedSel==='auto')
-    ? `${user.seabed.label} ${user.seabed.raw?`<span class="muted">(“${user.seabed.raw}”)</span>`:''}`
+    ? `${user.seabed.label}${user.seabed.raw?` <span class="muted">(“${user.seabed.raw}”)</span>`:''}`
     : seabedSel.replace('_',' ');
-  const modelUsed = (user.weather?.model) ? user.weather.model : 'auto/best';
+  const ratio = catenaryRatio(chainRequired, workingDepth, peakG);
   notesEl.innerHTML = `
     Peak gust next ${document.getElementById('lookahead').value}h: <strong>${peakG.toFixed(0)} kn</strong><br/>
     Seabed: <strong>${seabedLabel}</strong><br/>
-    Weather model: <strong>${modelUsed}</strong><br/>
+    Catenary heuristic ratio: <strong>${ratio.toFixed(2)}</strong> (≥1.2 is good).<br/>
     Tip: if it gets lumpy, add scope (+20–30%) or lengthen the bridle.
   `;
 }
 
-/* === Bootstrap on load === */
+/* ===== Bootstrap (auto-location) ===== */
 async function bootstrap(){
-  // Geolocate
   navigator.geolocation.getCurrentPosition(async pos=>{
-    user.lat = pos.coords.latitude;
-    user.lon = pos.coords.longitude;
+    user.lat = pos.coords.latitude; user.lon = pos.coords.longitude;
     document.getElementById('coords').textContent = `Lat ${user.lat.toFixed(5)}, Lon ${user.lon.toFixed(5)}`;
     updateMap(user.lat, user.lon);
 
-    // Weather
     try{
-      const data = await fetchWeather(user.lat, user.lon);
-      user.weather = data;
-      // Expose a readable model label if present
+      user.weather = await fetchWeather(user.lat, user.lon);
+      const times = user.weather.hourly.time;
+      drawChart(times, user.weather.hourly.wind_speed_10m, user.weather.hourly.wind_gusts_10m);
       document.getElementById('modelInfo').textContent =
-        (data && data.current && data.current.weather_model) ? `Model: ${data.current.weather_model}` :
         (document.getElementById('model').value ? `Model: ${document.getElementById('model').selectedOptions[0].text}` : 'Model: Best match (auto)');
-
-      const times = data.hourly.time;
-      const wind = data.hourly.wind_speed_10m;
-      const gust = data.hourly.wind_gusts_10m;
-      drawChart(times, wind, gust);
     }catch(err){
       document.getElementById('modelInfo').textContent = `Weather error: ${err.message}`;
     }
 
-    // Seabed (Europe) if auto selected
     if(document.getElementById('seabed').value==='auto'){
-      try{
-        const s = await fetchSeabedEUSeaMap(user.lat, user.lon);
-        user.seabed = s;
-      }catch(e){
-        user.seabed = { code:'unknown', label:'Unknown', source:'EMODnet', raw:null };
-      }
+      user.seabed = await fetchSeabedEU(user.lat, user.lon);
     }
-
-    // First calculation
     calculateNow();
   }, err=>{
     document.getElementById('coords').textContent = `Location error: ${err.message}`;
   });
 }
 
-/* Re-calc on input changes and button */
+/* Re-draw and re-calc on changes (with chart single-instance guard) */
 document.getElementById('calc').addEventListener('click', calculateNow);
 ['depth','tide','seabed','crowd','lookahead','model'].forEach(id=>{
   document.getElementById(id).addEventListener('change', async ()=>{
     if(id==='model' && user.lat && user.lon){
-      // Refetch weather for new model
       try{
         user.weather = await fetchWeather(user.lat, user.lon);
         const times = user.weather.hourly.time;
