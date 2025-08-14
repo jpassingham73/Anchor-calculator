@@ -1,145 +1,144 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Elba45 Anchor Scope Calculator</title>
-
-<!-- Leaflet CSS -->
-<link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
-
-<!-- Chart.js -->
-<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-
-<style>
-  body {
-    font-family: Arial, sans-serif;
-    padding: 10px;
-    background: #f8f9fa;
-  }
-  h1 { font-size: 1.4em; }
-  label { display: block; margin-top: 10px; }
-  select, input { width: 100%; padding: 5px; margin-top: 5px; }
-  button { margin-top: 15px; padding: 10px; width: 100%; background: #007bff; color: white; border: none; }
-  #map { height: 200px; margin-top: 10px; }
-  #result { background: white; padding: 10px; margin-top: 15px; border-radius: 4px; }
-  canvas { margin-top: 15px; background: white; padding: 10px; border-radius: 4px; }
-</style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Elba45 Anchor Scope Calculator</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body { font-family: Arial, sans-serif; background: #f4f6f8; margin: 0; padding: 0; }
+        header { background: #004d7a; color: white; padding: 1rem; text-align: center; font-size: 1.5rem; }
+        .container { display: flex; flex-wrap: wrap; padding: 1rem; gap: 1rem; }
+        .card { background: white; border-radius: 10px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); padding: 1rem; flex: 1; }
+        #map { height: 300px; border-radius: 10px; }
+        #scopeResult { font-size: 1.3rem; font-weight: bold; padding: 1rem; border-radius: 10px; margin-top: 1rem; text-align: center; }
+        .safe { background-color: #d4edda; color: #155724; }
+        .borderline { background-color: #fff3cd; color: #856404; }
+        .short { background-color: #f8d7da; color: #721c24; }
+        @media (min-width: 900px) {
+            .left, .right { flex: 1; min-width: 45%; }
+        }
+    </style>
 </head>
 <body>
-
-<h1>Elba45 Anchor Scope Calculator</h1>
-
-<label for="depth">Water depth (m):</label>
-<input type="number" id="depth" step="0.1" />
-
-<label for="chain">Chain length on board (m):</label>
-<input type="number" id="chain" value="100" step="1" />
-
-<label for="model">Weather model:</label>
-<select id="model">
-  <option value="gfs">GFS (NOAA)</option>
-  <option value="ecmwf">ECMWF</option>
-  <option value="icon">ICON</option>
-</select>
-
-<button id="locate">Use Current Location</button>
-<div id="map"></div>
-
-<canvas id="windChart"></canvas>
-
-<button id="calculate">Calculate Scope</button>
-<div id="result"></div>
-
-<!-- Leaflet JS -->
-<script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
-
+<header>Elba45 Anchor Scope Calculator</header>
+<div class="container">
+    <div class="card left">
+        <div id="map"></div>
+        <p id="coords"></p>
+    </div>
+    <div class="card right">
+        <canvas id="windChart" height="200"></canvas>
+        <div id="scopeResult"></div>
+    </div>
+</div>
 <script>
-let lat, lon, windData = { gusts: [], times: [] };
+const bridleLength = 8; // metres
+const chainDiameter = 10; // mm
+const safetyFactor = 5; // default scope ratio
+
+let map, marker, windChart;
 
 // Initialise map
-const map = L.map('map').setView([0,0], 2);
-L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-  attribution: '© OpenStreetMap contributors'
-}).addTo(map);
-let marker;
-
-// Location button
-document.getElementById('locate').addEventListener('click', () => {
-  navigator.geolocation.getCurrentPosition(pos => {
-    lat = pos.coords.latitude;
-    lon = pos.coords.longitude;
-    map.setView([lat, lon], 14);
-    if (marker) marker.remove();
+function initMap(lat, lon) {
+    map = L.map('map').setView([lat, lon], 14);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '© OpenStreetMap contributors'
+    }).addTo(map);
     marker = L.marker([lat, lon]).addTo(map);
-    fetchWeather();
-  }, err => alert("Location error: " + err.message));
-});
+}
 
-// Fetch weather from Open-Meteo
-function fetchWeather() {
-  const model = document.getElementById('model').value;
-  const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&hourly=windspeed_10m,windgusts_10m&forecast_days=1&model=${model}`;
-  
-  fetch(url).then(res => res.json()).then(data => {
-    windData.times = data.hourly.time.map(t => t.split('T')[1]);
-    const gusts = data.hourly.windgusts_10m;
-    const sustained = data.hourly.windspeed_10m;
-    windData.gusts = gusts;
-    drawChart(sustained, gusts, windData.times);
-  });
+// Update marker
+function updateMap(lat, lon) {
+    if (!map) initMap(lat, lon);
+    marker.setLatLng([lat, lon]);
+    map.setView([lat, lon], 14);
+}
+
+// Fetch weather (Open-Meteo free API)
+async function fetchWeather(lat, lon) {
+    const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&hourly=windspeed_10m,windgusts_10m&forecast_days=1`;
+    const res = await fetch(url);
+    const data = await res.json();
+    return {
+        hours: data.hourly.time.map(t => t.slice(11,16)),
+        wind: data.hourly.windspeed_10m,
+        gust: data.hourly.windgusts_10m
+    };
+}
+
+// Fetch seabed type (EMODnet API)
+async function fetchSeabedType(lat, lon) {
+    const url = `https://ows.emodnet-seabedhabitats.eu/geoserver/emodnet_view/wms?service=WMS&version=1.3.0&request=GetFeatureInfo&layers=EUSeaMap:EUSeaMap_2023_EUNIS2019&bbox=${lon-0.01},${lat-0.01},${lon+0.01},${lat+0.01}&width=1&height=1&srs=EPSG:4326&format=application/json&info_format=application/json`;
+    const res = await fetch(url);
+    const data = await res.json();
+    const feature = data.features[0];
+    if (feature) {
+        const habitat = feature.properties.habitat;
+        return habitat ? habitat : 'Unknown';
+    }
+    return 'Unknown';
 }
 
 // Draw wind chart
-function drawChart(sustained, gusts, labels) {
-  const ctx = document.getElementById('windChart').getContext('2d');
-  new Chart(ctx, {
-    type: 'line',
-    data: {
-      labels,
-      datasets: [
-        { label: 'Sustained (kt)', data: sustained.map(k => (k*0.54).toFixed(1)), borderColor: 'blue', fill: false },
-        { label: 'Gusts (kt)', data: gusts.map(k => (k*0.54).toFixed(1)), borderColor: 'red', fill: false }
-      ]
-    },
-    options: {
-      responsive: true,
-      plugins: { legend: { position: 'top' } }
-    }
-  });
+function drawWindChart(labels, wind, gust) {
+    const ctx = document.getElementById('windChart').getContext('2d');
+    if (windChart) windChart.destroy();
+    windChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: labels,
+            datasets: [
+                { label: 'Wind Speed (kn)', data: wind, borderColor: '#007bff', fill: false },
+                { label: 'Wind Gusts (kn)', data: gust, borderColor: '#ff0000', fill: false }
+            ]
+        },
+        options: { responsive: true, maintainAspectRatio: false }
+    });
 }
 
 // Scope calculation
-document.getElementById('calculate').addEventListener('click', () => {
-  const depth = parseFloat(document.getElementById('depth').value);
-  const chain = parseFloat(document.getElementById('chain').value);
-  if (!depth || !chain || !lat || !lon || windData.gusts.length === 0) {
-    alert("Please enter depth, chain, and fetch location/weather first.");
-    return;
-  }
-  
-  const bridleLength = 8; // m
-  const freeboard = 1.5; // m for Elba45
-  const maxGust = Math.max(...windData.gusts) * 0.54; // knots
-  let scopeRatio;
-  
-  if (maxGust < 15) scopeRatio = 4;
-  else if (maxGust < 25) scopeRatio = 5;
-  else if (maxGust < 35) scopeRatio = 7;
-  else scopeRatio = 10;
-  
-  const required = (depth + freeboard) * scopeRatio - bridleLength;
-  
-  const msg = `
-    <strong>Max forecast gust:</strong> ${maxGust.toFixed(1)} kn<br/>
-    <strong>Recommended scope ratio:</strong> ${scopeRatio}:1<br/>
-    <strong>Required chain length:</strong> ${required.toFixed(1)} m<br/>
-    <strong>Available chain:</strong> ${chain} m<br/>
-    ${required <= chain ? '✅ You have enough chain.' : '⚠️ Not enough chain for recommended scope!'}
-  `;
-  document.getElementById('result').innerHTML = msg;
+function calculateScope(maxWind, depth, seabedType) {
+    let ratio = safetyFactor;
+    if (seabedType === 'Mud' || seabedType === 'Seagrass') ratio = 7;
+    if (seabedType === 'Rock') ratio = 3;
+    if (maxWind > 20) ratio = 7;
+    if (maxWind > 30) ratio = 10;
+    const totalScope = depth * ratio;
+    const chainLength = totalScope - bridleLength;
+    return { chain: Math.max(chainLength, 0), ratio };
+}
+
+// Show result card
+function showScopeResult(chain, ratio) {
+    const resultDiv = document.getElementById('scopeResult');
+    let cls = 'safe';
+    if (ratio >= 7 && ratio < 10) cls = 'borderline';
+    if (ratio >= 10) cls = 'short';
+    resultDiv.className = cls;
+    resultDiv.textContent = `Recommended Chain: ${chain.toFixed(1)} m (Scope ratio ${ratio}:1)`;
+}
+
+// Main auto-start
+navigator.geolocation.getCurrentPosition(async pos => {
+    const lat = pos.coords.latitude;
+    const lon = pos.coords.longitude;
+    document.getElementById('coords').textContent = `Lat: ${lat.toFixed(5)}, Lon: ${lon.toFixed(5)}`;
+    updateMap(lat, lon);
+    const weather = await fetchWeather(lat, lon);
+    drawWindChart(weather.hours, weather.wind, weather.gust);
+    const maxWind = Math.max(...weather.wind, ...weather.gust);
+    const depth = prompt("Enter water depth at bow (m):", "5");
+    if (depth) {
+        const seabedType = await fetchSeabedType(lat, lon);
+        const { chain, ratio } = calculateScope(maxWind, parseFloat(depth), seabedType);
+        showScopeResult(chain, ratio);
+    }
+}, err => {
+    alert("Location permission denied or unavailable.");
 });
 </script>
-
 </body>
 </html>
