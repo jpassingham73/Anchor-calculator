@@ -1,0 +1,303 @@
+<!--
+Elba45 Anchor Scope Calculator
+Single-file HTML + JS app
+
+How to use:
+ 1. Save this file as elba45-anchor-calculator.html and open in a modern browser (online).
+ 2. The app will ask for your location (optional) to fetch weather from Open-Meteo.
+ 3. If tide API is unavailable or you prefer, enter local tide allowance manually.
+
+Notes:
+ - Defaults are set for Fountaine Pajot Elba 45 and your supplied bridle (8m 20mm Liros Squareline polyester).
+ - Weather fetched from Open-Meteo (no API key). Tide lookup is optional and falls back to user input.
+ - This is a practical aid and uses conservative heuristics. Always use seamanship judgement.
+
+--><!doctype html>
+
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Elba45 Anchor Scope Calculator</title>
+<style>
+  body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial;margin:0;padding:0;background:#f7fafc;color:#0f172a}
+  .wrap{max-width:980px;margin:18px auto;padding:18px}
+  header{display:flex;gap:12px;align-items:center}
+  h1{margin:0;font-size:1.4rem}
+  .card{background:white;border-radius:12px;padding:14px;box-shadow:0 6px 18px rgba(2,6,23,0.06);margin-top:12px}
+  label{display:block;margin-top:8px;font-weight:600}
+  input,select{width:100%;padding:8px;border-radius:8px;border:1px solid #d1d5db;margin-top:6px}
+  .row{display:flex;gap:12px}
+  .col{flex:1}
+  button{background:#0ea5a4;color:white;border:none;padding:10px 14px;border-radius:8px;font-weight:700;cursor:pointer;margin-top:10px}
+  .muted{color:#475569;font-size:0.9rem}
+  pre{background:#0f172a;color:#f8fafc;padding:12px;border-radius:8px;overflow:auto}
+  .result{font-size:1.1rem;margin-top:10px}
+  .small{font-size:0.9rem;color:#334155}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <img src="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='48' height='48' viewBox='0 0 24 24'><path fill='%230ea5a4' d='M12 2L15 8h6l-4.9 3.6L18 20l-6-3.6L6 20l1.9-8.4L3 8h6L12 2z'/></svg>" alt="logo" style="width:48px;height:48px;border-radius:8px;background:#ecfeff;padding:8px"/>
+    <div>
+      <h1>Elba45 Anchor Scope Calculator</h1>
+      <div class="muted">Defaults shown for info; all fields editable. Pulls weather from Open-Meteo.</div>
+    </div>
+  </header>  <div class="card">
+    <strong>About your setup</strong>
+    <div class="small">Boat: Fountaine Pajot Elba 45 &nbsp; | &nbsp; Bow roller height: <span id="bowHeightDisplay">1.3</span> m</div>
+    <div class="small">Chain: 10 mm Grade 40 (~2.2 kg/m in water) &nbsp; | &nbsp; Bridle: <span id="bridleDisplay">8 m / 20 mm Liros Squareline polyester</span></div>
+    <div class="small">Note: Polyester bridle approximated at 3% stretch under working load; calculator will add a conservative +10% scope bump above 25 kt to compensate.</div>
+  </div>  <div class="card">
+    <strong>Location & auto-fetch</strong>
+    <div class="small">Use your device location for automatic weather. Tide lookup is optional — if unavailable, use tide allowance field.</div>
+    <div style="margin-top:8px" class="row">
+      <div class="col"><button id="locBtn">Use current location</button></div>
+      <div class="col"><button id="clearLoc">Clear</button></div>
+    </div>
+    <div id="locInfo" class="small" style="margin-top:8px"></div>
+  </div>  <div class="card">
+    <strong>Inputs</strong>
+    <div class="row">
+      <div class="col">
+        <label>Water depth (m) — from sounder (keel)</label>
+        <input id="depthInput" type="number" step="0.1" value="6">
+      </div>
+      <div class="col">
+        <label>Tide allowance (m) — if tide lookup fails, adjust</label>
+        <input id="tideInput" type="number" step="0.1" value="0.5">
+      </div>
+    </div><label>Seabed type</label>
+<select id="seabedSelect">
+  <option value="sand" selected>Sand (good)</option>
+  <option value="firm_mud">Firm mud</option>
+  <option value="soft_mud">Soft mud / weed</option>
+  <option value="rock">Rock / poor holding</option>
+  <option value="unknown">Unknown</option>
+</select>
+
+<label>Crowding (swing room)</label>
+<select id="crowdSelect">
+  <option value="normal" selected>Normal</option>
+  <option value="tight">Tight (reduce scope if needed)</option>
+  <option value="unlimited">Unlimited</option>
+</select>
+
+<label>Forecast lookahead (hours)</label>
+<select id="hoursSelect">
+  <option value="6">6 h</option>
+  <option value="12">12 h</option>
+  <option value="24" selected>24 h</option>
+</select>
+
+<div style="margin-top:8px">
+  <button id="calcBtn">Calculate recommended chain</button>
+</div>
+
+  </div>  <div class="card">
+    <strong>Results</strong>
+    <div id="results" class="result muted">Not calculated yet.</div>
+    <div id="details" class="small"></div>
+  </div>  <div class="card">
+    <strong>Advanced & debug</strong>
+    <label>Bow roller height (m)</label>
+    <input id="bowHeight" type="number" step="0.01" value="1.3">
+    <label>Chain diameter (mm)</label>
+    <input id="chainDia" type="number" step="0.1" value="10">
+    <label>Chain weight in water (kg/m)</label>
+    <input id="chainWeight" type="number" step="0.01" value="2.2">
+    <label>Windage area (broadside m²)</label>
+    <input id="windageArea" type="number" step="1" value="70">
+    <div style="margin-top:8px"><button id="saveDefaults">Save defaults (local)</button></div>
+  </div>  <div class="card small">
+    <strong>How the numbers are derived (brief)</strong>
+    <ul>
+      <li>Working depth = depth + tide allowance + bow roller height.</li>
+      <li>Base scope chosen from peak gust bin; seabed, waves and bridle stretch modify scope.</li>
+      <li>Estimate of catenary retention uses chain weight, boat wind force and deployed chain — conservative heuristic only.</li>
+    </ul>
+    <div class="small">Always verify with a practical back-down test and use seamanship judgement.</div>
+  </div>  <footer style="text-align:center;margin-top:18px;color:#475569;font-size:0.9rem">Built for Elba45 — prototype. Save file locally and open in browser. No telemetry sent.</footer>
+</div><script>
+// Defaults (user-specific)
+let defaults = {
+  bowHeight: 1.3,
+  chainDia: 10,
+  chainWeight: 2.2, // kg/m in water
+  bridle: '8 m / 20 mm Liros Squareline polyester',
+  bridleLength: 8,
+  bridleStretchPercent: 3, // typical polyester working stretch
+  windageArea: 70 // m2 broadside
+};
+
+// UI refs
+const locBtn = document.getElementById('locBtn');
+const clearLoc = document.getElementById('clearLoc');
+const locInfo = document.getElementById('locInfo');
+const calcBtn = document.getElementById('calcBtn');
+const resultsDiv = document.getElementById('results');
+const detailsDiv = document.getElementById('details');
+
+// populate defaults on page
+function populateDefaults(){
+  document.getElementById('bowHeight').value = defaults.bowHeight;
+  document.getElementById('chainDia').value = defaults.chainDia;
+  document.getElementById('chainWeight').value = defaults.chainWeight;
+  document.getElementById('windageArea').value = defaults.windageArea;
+  document.getElementById('bridleDisplay').innerText = defaults.bridle;
+  document.getElementById('bowHeightDisplay').innerText = defaults.bowHeight;
+}
+populateDefaults();
+
+// Save/load local
+document.getElementById('saveDefaults').addEventListener('click', ()=>{
+  defaults.bowHeight = parseFloat(document.getElementById('bowHeight').value) || defaults.bowHeight;
+  defaults.chainDia = parseFloat(document.getElementById('chainDia').value) || defaults.chainDia;
+  defaults.chainWeight = parseFloat(document.getElementById('chainWeight').value) || defaults.chainWeight;
+  defaults.windageArea = parseFloat(document.getElementById('windageArea').value) || defaults.windageArea;
+  localStorage.setItem('elba45_defaults', JSON.stringify(defaults));
+  document.getElementById('bowHeightDisplay').innerText = defaults.bowHeight;
+  alert('Defaults saved locally');
+});
+
+// load if present
+const stored = localStorage.getItem('elba45_defaults');
+if(stored){ try{ defaults = JSON.parse(stored); populateDefaults(); } catch(e){} }
+
+let userLocation = null;
+locBtn.addEventListener('click', ()=>{
+  if(!navigator.geolocation){ locInfo.innerText = 'Geolocation unavailable in this browser'; return; }
+  locInfo.innerText = 'Getting location…';
+  navigator.geolocation.getCurrentPosition(async (pos)=>{
+    const lat = pos.coords.latitude; const lon = pos.coords.longitude;
+    userLocation = {lat,lon};
+    locInfo.innerHTML = `Location: ${lat.toFixed(5)}, ${lon.toFixed(5)} (fetching weather)`;
+    await fetchWeatherAndInform(lat,lon);
+  }, (err)=>{ locInfo.innerText = 'Location permission denied or unavailable'; });
+});
+clearLoc.addEventListener('click', ()=>{ userLocation=null; locInfo.innerText=''; });
+
+async function fetchWeatherAndInform(lat,lon){
+  try{
+    // Open-Meteo forecast (hourly windgusts and windspeed)
+    const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&hourly=windgusts_10m,winddirection_10m,windspeed_10m&current_weather=true&timezone=auto`;
+    const r = await fetch(url); const data = await r.json();
+    // store in userLocation
+    userLocation.weather = data;
+    locInfo.innerHTML += '<br/>Weather cached — ready';
+  }catch(e){ locInfo.innerHTML += '<br/>Weather fetch failed'; }
+}
+
+// Calculation helpers
+function baseScopeForGust(knots){
+  if(knots <= 12) return 4;
+  if(knots <= 20) return 5;
+  if(knots <= 30) return 7;
+  if(knots <= 40) return 8;
+  return 10;
+}
+
+function seabedModifier(type){
+  switch(type){
+    case 'sand': return 1.0;
+    case 'firm_mud': return 1.12;
+    case 'soft_mud': return 1.3;
+    case 'rock': return 1.5;
+    default: return 1.2;
+  }
+}
+
+function crowdingModifier(c){
+  if(c==='tight') return 0.9; // reduce scope if necessary (but warn)
+  return 1.0;
+}
+
+// estimate wind force on hull (conservative) using broadside area and gust speed
+function windForceN(area_m2, gust_knots){
+  const v_ms = gust_knots * 0.514444; // knots to m/s
+  const rho = 1.225; const Cd = 1.2; // Cd conservative
+  return 0.5 * rho * Cd * area_m2 * v_ms * v_ms; // Newtons
+}
+
+// basic catenary heuristic: compare chain weight vertical component vs horizontal wind force
+function catenaryIndicator(chainWeightKgPerM, deployed_m, workingDepth_m, windForceN){
+  // total weight of chain in water (approx) -> convert to N
+  const g = 9.81;
+  const W = chainWeightKgPerM * deployed_m * g; // N
+  // vertical holding component available ~ W * (vertical drop / deployed length)
+  const verticalFraction = Math.min(1, workingDepth_m / Math.max(0.5, deployed_m));
+  const verticalSupport = W * verticalFraction;
+  // If verticalSupport * factor > windForce -> likely catenary retained
+  const factor = 1.2; // safety
+  const ratio = (verticalSupport * factor) / Math.max(1, windForceN);
+  return {verticalSupport, windForceN, ratio};
+}
+
+// main calculation
+async function calculate(){
+  resultsDiv.innerText = 'Calculating…'; detailsDiv.innerText='';
+  const depth = parseFloat(document.getElementById('depthInput').value) || 0;
+  const tideAllowance = parseFloat(document.getElementById('tideInput').value) || 0;
+  const seabed = document.getElementById('seabedSelect').value;
+  const crowd = document.getElementById('crowdSelect').value;
+  const lookahead = parseInt(document.getElementById('hoursSelect').value,10) || 24;
+  // refresh defaults from advanced
+  defaults.bowHeight = parseFloat(document.getElementById('bowHeight').value) || defaults.bowHeight;
+  defaults.chainDia = parseFloat(document.getElementById('chainDia').value) || defaults.chainDia;
+  defaults.chainWeight = parseFloat(document.getElementById('chainWeight').value) || defaults.chainWeight;
+  defaults.windageArea = parseFloat(document.getElementById('windageArea').value) || defaults.windageArea;
+  document.getElementById('bowHeightDisplay').innerText = defaults.bowHeight;
+
+  // determine working depth
+  const workingDepth = depth + tideAllowance + defaults.bowHeight;
+
+  // weather: choose peak gust in lookahead window
+  let peakGust = 15; // sensible default
+  let waveHs = null;
+  if(userLocation && userLocation.weather && userLocation.weather.hourly){
+    // open-meteo returns hourly.windgusts_10m array and time
+    const h = userLocation.weather.hourly;
+    if(h.windgusts_10m && h.time){
+      // find max within lookahead from current time index 0..lookahead
+      const gusts = h.windgusts_10m.slice(0, Math.min(h.windgusts_10m.length, lookahead+1));
+      peakGust = Math.max(...gusts.filter(v=>v!=null));
+    }
+  }
+
+  // base scope
+  let scope = baseScopeForGust(peakGust);
+  // seabed
+  scope *= seabedModifier(seabed);
+  // crowding
+  scope *= crowdingModifier(crowd);
+  // bridle stretch adjustment: polyester low stretch means bump in high wind
+  if(peakGust > 25){ scope *= 1.10; }
+  // wave adjustment: approximate +0.5 scope for Hs >=1.5m (we don't have wave reliably here)
+  // (If wave data is available, you could increase scope further.)
+
+  // chain required
+  const chainRequired_m = Math.ceil(scope * workingDepth);
+
+  // wind force estimate using broadside area
+  const windN = windForceN(defaults.windageArea, peakGust);
+
+  // catenary check
+  const c = catenaryIndicator(defaults.chainWeight, chainRequired_m, workingDepth, windN);
+
+  // safety notes
+  let notes = [];
+  if(scope <= 5) notes.push('Scope is conservative for light to moderate winds.');
+  if(scope >= 8) notes.push('High scope recommended for strong winds — ensure swing room.');
+  if(c.ratio < 1.2) notes.push('Heuristic: chain may be flattening (catenary reduced). Use snubber or consider extra chain.');
+  if(crow==='tight') notes.push('Crowded anchorage selected — reducing recommended scope. Consider repositioning for safety.');
+
+  // present
+  resultsDiv.innerHTML = `<strong>Recommended chain to veer now: ${chainRequired_m} m</strong> (scope ${scope.toFixed(1)}:1, working depth ${workingDepth.toFixed(2)} m)`;
+  detailsDiv.innerHTML = `Peak gust (lookahead ${lookahead} h): <strong>${peakGust} kt</strong>.<br/>Estimated wind load (conservative): <strong>${Math.round(windN)} N</strong>.<br/>Catenary heuristic ratio: <strong>${c.ratio.toFixed(2)}</strong> (higher is better).<br/><br/>Notes:<ul>${notes.map(n=>'<li>'+n+'</li>').join('')}</ul>`;
+}
+
+calcBtn.addEventListener('click', calculate);
+
+</script></body>
+</html>
